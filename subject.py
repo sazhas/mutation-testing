@@ -1,15 +1,5 @@
-# Subject program for mutation testing and analysis
-
-# In f1(), changing + to - will change the behavior of f1(2,2) but not
-# f1(5,0). By contrast, changing + to * will not change the behavior of
-# f1(2,2) but will change the behavior of f1(5,0). 
 def f01(a,b):
         return a+b
-
-# For the remainder of the functions, you will have to read them yourself and 
-# think about which mutation operators you want to implement. Note that you
-# should not "hard-code" associations between mutation operators and particular
-# function names. 
 
 def f02(c,d):
         if c <= d:

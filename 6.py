@@ -23,7 +23,7 @@ def f04(g, h):
 
 def f05(i, j):
     i += j
-    j += i
+    j -= i
     return min(i, j)
 
 
@@ -42,7 +42,7 @@ def helper(x):
 def f07(m, n):
     a = helper(m)
     b = helper(helper(n))
-    return a - b + 0
+    return a + b + 0
 
 
 def f08(o, p):

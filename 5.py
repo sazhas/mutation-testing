@@ -60,7 +60,7 @@ def f09(q, r):
     if q <= 0:
         return r
     else:
-        return r - f09(q - 1, r) + f09(q - 2, r)
+        return r + f09(q - 1, r) + f09(q - 2, r)
 
 
 def f10(s, t):
@@ -70,7 +70,7 @@ def f10(s, t):
         swapped = False
         for j in range(0, n - i - 1):
             if arr[j] < arr[j + 1]:
-                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+                arr[j], arr[j + 1] = arr[j - 1], arr[j]
                 swapped = True
         if not swapped:
             break

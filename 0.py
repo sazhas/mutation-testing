@@ -15,7 +15,7 @@ def f03(e, f):
 
 
 def f04(g, h):
-    if True:
+    if False:
         return g
     else:
         return h
@@ -60,7 +60,7 @@ def f09(q, r):
     if q <= 0:
         return r
     else:
-        return r + f09(q - 1, r) - f09(q - 2, r)
+        return r + f09(q - 1, r) + f09(q - 2, r)
 
 
 def f10(s, t):
