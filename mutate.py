@@ -1,9 +1,9 @@
-# Returns a mutated AST for driver.py to write out.
-# Implements: comparison negation, binop swaps (+<->-, *<->//), safe deletion (stmt->Pass).
-# Extras for selectivity: AugAssign swaps, boolean flip in If/While tests, min<->max call swap.
+# Required ops: comparison negation, binop swaps (+<->-, *<->//), safe deletion (stmt->Pass).
+# Gentle extras: flip literal True/False in If/While (tiny chance), nudge literal 0→1 (tiny chance).
 import ast
 import random
 
+# Bro i actually don't know what else to try
 # ----- Operator maps -----
 CMP_NEGATION = {
     ast.Eq: ast.NotEq,
@@ -22,7 +22,7 @@ BIN_SWAP = {
     ast.FloorDiv: ast.Mult,  # // -> *
 }
 
-# Optional call-level swap (generic but helpful)
+# (Optional) call-level swap; left at weight 0 by default
 CALL_SWAP = {"min": "max", "max": "min"}
 
 # ----- Utilities -----
@@ -45,22 +45,22 @@ def names_defined_by_assign_stmt(node):
 
 
 class CandidateCounter(ast.NodeVisitor):
-    """
-    Pass 1: collect eligible mutation sites, record first-def names,
-    and track parents to avoid over-strong loop-comparison negations.
-    """
     def __init__(self):
-        # Sites (in visitation order)
-        self.cmp_sites = []        # list[(Compare node, op_index)]
-        self._cmp_keys = set()     # {(id(node), op_index)} to align indices in mutator
-        self.bin_sites = []        # list[("binop", BinOp) or ("aug", AugAssign)]
-        self.del_sites = []        # list[stmt nodes: Assign/AnnAssign/AugAssign/Expr(Call)]
-        self.bool_sites = []       # list[("if", If) or ("while", While)] where test is True/False Constant
-        self.call_sites = []       # list[Call] where callee is Name 'min' or 'max'
+        self.cmp_sites = []
+        self._cmp_keys = set()
 
-        self._parents = {}         # child -> parent
+        self.bin_sites = []
+        self.del_sites = []
+        self.bool_sites = []
+        self.call_sites = []
+
+        self.const_sites = []     # keep only this one
+        self._const_keys = set()  # track ids for alignment
+
+        self._parents = {}
         self.first_def_names = set()
         self._seen_any_def = set()
+
 
     # parent tracking
     def generic_visit(self, node):
@@ -72,6 +72,14 @@ class CandidateCounter(ast.NodeVisitor):
         p = self._parents.get(node)
         while p:
             if isinstance(p, (ast.For, ast.While)):
+                return True
+            p = self._parents.get(p)
+        return False
+
+    def _is_under_try(self, node):
+        p = self._parents.get(node)
+        while p:
+            if isinstance(p, ast.Try):
                 return True
             p = self._parents.get(p)
         return False
@@ -92,7 +100,7 @@ class CandidateCounter(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_AugAssign(self, node: ast.AugAssign):
-        # aug-assign operator swap candidates (e.g., +=, -=, *=, //=)
+        # AugAssign operator swap candidates (+=, -=, *=, //=)
         if type(node.op) in BIN_SWAP:
             self.bin_sites.append(("aug", node))
         # also deletable as a statement
@@ -116,7 +124,6 @@ class CandidateCounter(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If):
-        # boolean flip candidate only if test is literal True/False
         if isinstance(node.test, ast.Constant) and isinstance(node.test.value, bool):
             self.bool_sites.append(("if", node))
         self.generic_visit(node)
@@ -127,10 +134,17 @@ class CandidateCounter(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call):
-        # min <-> max swap
         f = node.func
         if isinstance(f, ast.Name) and f.id in CALL_SWAP:
             self.call_sites.append(node)
+        self.generic_visit(node)
+
+    def visit_Constant(self, node: ast.Constant):
+        # Only literal *int* 0 (not bool), and not inside loops/try
+        if type(node.value) is int and node.value == 0:
+            if not self._is_under_loop(node) and not self._is_under_try(node):
+                self.const_sites.append(node)
+                self._const_keys.add(id(node))
         self.generic_visit(node)
 
     def _maybe_record_first_defs(self, node):
@@ -145,17 +159,19 @@ class Mutator(ast.NodeTransformer):
     Pass 2: apply exactly the planned edits. We keep running indices
     in the same visitation order as CandidateCounter for each category.
     """
-    def __init__(self, plan, first_def_names, cmp_keys):
+    def __init__(self, plan, first_def_names, cmp_keys, const_keys):
         super().__init__()
         self.plan = {k: set(v) for k, v in plan.items()}
         self.first_def_names = set(first_def_names)
         self.cmp_keys = set(cmp_keys)
+        self.const_keys = set(const_keys)
 
         self.seen_cmp = 0
-        self.seen_bin = 0   # counts both BinOp and AugAssign eligible sites
+        self.seen_bin = 0       # BinOp + AugAssign eligible sites
         self.seen_del = 0
         self.seen_bool = 0
         self.seen_call = 0
+        self.seen_const = 0
 
     # ---- Compare ----
     def visit_Compare(self, node: ast.Compare):
@@ -179,7 +195,7 @@ class Mutator(ast.NodeTransformer):
             self.seen_bin += 1
         return node
 
-    # ---- AugAssign treated as a bin-like site for swaps OR deletable stmt ----
+    # ---- AugAssign treated as bin-like site for swaps OR deletable stmt ----
     def visit_AugAssign(self, node: ast.AugAssign):
         super().generic_visit(node)
         changed = False
@@ -188,7 +204,6 @@ class Mutator(ast.NodeTransformer):
                 node.op = BIN_SWAP[type(node.op)]()
                 changed = True
             self.seen_bin += 1
-        # deletion path (only if not already changed by bin plan)
         if not changed:
             return self._maybe_delete_stmt(node)
         return node
@@ -234,7 +249,7 @@ class Mutator(ast.NodeTransformer):
             self.seen_bool += 1
         return node
 
-    # ---- Call swap: min <-> max ----
+    # ---- Call swap: min <-> max (disabled by default via weights) ----
     def visit_Call(self, node: ast.Call):
         super().generic_visit(node)
         f = node.func
@@ -242,6 +257,15 @@ class Mutator(ast.NodeTransformer):
             if "call" in self.plan and self.seen_call in self.plan["call"]:
                 f.id = CALL_SWAP[f.id]
             self.seen_call += 1
+        return node
+
+    # ---- Constant nudge: literal 0 -> 1 ----
+    def visit_Constant(self, node: ast.Constant):
+        super().generic_visit(node)
+        if isinstance(node.value, int) and node.value == 0:
+            if "const" in self.plan and self.seen_const in self.plan["const"]:
+                return ast.copy_location(ast.Constant(value=1), node)
+            self.seen_const += 1
         return node
 
 
@@ -253,32 +277,35 @@ def _choose_plan(counter: CandidateCounter) -> dict:
     """
     avail = {
         "cmp": len(counter.cmp_sites),
-        "bin": len(counter.bin_sites),     # includes BinOp + AugAssign
+        "bin": len(counter.bin_sites),        # BinOp + AugAssign
         "del": len(counter.del_sites),
-        "bool": len(counter.bool_sites),   # If/While literal test flips
-        "call": len(counter.call_sites),   # min<->max swaps
+        "bool": len(counter.bool_sites),      # If/While literal test flips
+        "const": len(counter.const_sites),    # nudge 0 -> 1
+        "call": len(counter.call_sites),      # min<->max (kept at 0 weight)
     }
 
-    # keep comparisons & binops dominant; extras are gentle spice
+    # conservative profile; tiny chance for bool/const to pick up f04/f07
     base_weights = {
-        "cmp":  0.44,
-        "bin":  0.44,
-        "del":  0.04,
-        "bool": 0.04,
-        "call": 0.04,
+        "cmp":   0.49,
+        "bin":   0.48,
+        "del":   0.00,
+        "bool":  0.02,
+        "const": 0.01,   # tiny, now safe
+        "call":  0.00,
     }
 
-    kinds = [k for k, n in avail.items() if n > 0]
+    kinds = [k for k, n in avail.items() if n > 0 and base_weights.get(k, 0) > 0.0]
     if not kinds:
-        return {}
+        # fallback: if only zero-weight kinds are available, temporarily allow bin/cmp if present
+        kinds = [k for k, n in avail.items() if n > 0] or []
+        if not kinds:
+            return {}
 
     weights = [base_weights[k] for k in kinds]
     s = sum(weights)
     weights = [w / s for w in weights] if s > 0 else [1 / len(kinds)] * len(kinds)
 
     chosen_kind = random.choices(kinds, weights=weights, k=1)[0]
-
-    # pick a single index in that category
     n = avail[chosen_kind]
     idx = random.randint(0, n - 1)
     return {chosen_kind: [idx]}
@@ -298,9 +325,12 @@ def mutate(tree: ast.AST) -> ast.AST:
         return tree
 
     # Pass 2
-    mutator = Mutator(plan,
-                      first_def_names=counter.first_def_names,
-                      cmp_keys=counter._cmp_keys)
+    mutator = Mutator(
+        plan,
+        first_def_names=counter.first_def_names,
+        cmp_keys=counter._cmp_keys,
+        const_keys=counter._const_keys,  # NEW
+    )
     new_tree = mutator.visit(tree)
     ast.fix_missing_locations(new_tree)
     return new_tree

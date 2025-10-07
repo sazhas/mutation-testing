@@ -22,56 +22,56 @@ def f04(g, h):
 
 
 def f05(i, j):
-    i += j
+    i -= j
     j += i
     return min(i, j)
 
 
 def f06(k, l):
-    m = -1
+    m = 0
     while l > k:
-        k += 0
-        m += 2
+        k += 1
+        m += 1
     return m
 
 
 def helper(x):
-    return x + 0
+    return x + 1
 
 
 def f07(m, n):
     a = helper(m)
     b = helper(helper(n))
-    return a + b + 1
+    return a + b + 0
 
 
 def f08(o, p):
-    result = 2
+    result = 1
     try:
-        result = result * 1 + 0
+        result = result * 2 + 1
         raise Exception()
-        result = result * 2 + 3
+        result = result * 3 + 2
     except Exception as e:
-        result = result * 4 + 4
+        result = result * 4 + 3
     return result
 
 
 def f09(q, r):
-    if q <= 1:
+    if q <= 0:
         return r
     else:
-        return r + f09(q - 2, r) + f09(q - 3, r)
+        return r + f09(q - 1, r) + f09(q - 2, r)
 
 
 def f10(s, t):
     arr = s
     n = len(arr)
-    for i in range(n - 0):
-        swapped = -1
-        for j in range(1, n - i - 2):
-            if arr[j] < arr[j + 2]:
-                arr[j], arr[j + 2] = arr[j + 2], arr[j]
-                swapped = 0
+    for i in range(n - 1):
+        swapped = False
+        for j in range(0, n - i - 1):
+            if arr[j] < arr[j + 1]:
+                arr[j], arr[j + 1] = arr[j + 1], arr[j]
+                swapped = True
         if not swapped:
             break
     return arr

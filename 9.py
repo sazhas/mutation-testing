@@ -50,14 +50,14 @@ def f08(o, p):
     try:
         result = result * 2 + 1
         raise Exception()
-        result = result * 3 - 2
+        result = result * 3 + 2
     except Exception as e:
         result = result * 4 + 3
     return result
 
 
 def f09(q, r):
-    if q <= 0:
+    if q > 0:
         return r
     else:
         return r + f09(q - 1, r) + f09(q - 2, r)

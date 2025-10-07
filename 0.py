@@ -15,7 +15,7 @@ def f03(e, f):
 
 
 def f04(g, h):
-    if False:
+    if True:
         return g
     else:
         return h
@@ -52,7 +52,7 @@ def f08(o, p):
         raise Exception()
         result = result * 3 + 2
     except Exception as e:
-        result = result * 4 + 3
+        result = result * 4 - 3
     return result
 
 
